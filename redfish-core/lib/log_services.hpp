@@ -327,12 +327,53 @@ inline void handleManagersEventLogServiceGet(
 
     crow::App& app, const crow::Request& req,
     const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
+<<<<<<< HEAD
     const std::string& managerId)
 {
     if (!redfish::setUpRedfishRoute(app, req, asyncResp))
+=======
+    const boost::urls::url& urlLogEntryPrefix, const std::string& entryID)
+{
+    auto respHandler = [asyncResp, urlLogEntryPrefix,
+                        entryID](const boost::system::error_code& ec,
+                                 const std::string& pelJson) {
+        if (ec.value() == EBADR)
+        {
+            messages::resourceNotFound(asyncResp->res, "OemPelAttachment",
+                                       entryID);
+            return;
+        }
+        if (ec)
+        {
+            BMCWEB_LOG_ERROR("DBUS response error {}", ec);
+            messages::internalError(asyncResp->res);
+            return;
+        }
+
+        asyncResp->res.jsonValue["@odata.id"] = boost::urls::format(
+            "{}/{}/OemPelAttachment", urlLogEntryPrefix, entryID);
+        asyncResp->res.jsonValue["@odata.type"] =
+            "#IBMLogEntryAttachment.v1_0_0.IBMLogEntryAttachment";
+
+        asyncResp->res.jsonValue["Name"] = "OemPelAttachment";
+        asyncResp->res.jsonValue["Id"] = "OemPelAttachment";
+
+        asyncResp->res.jsonValue["Oem"]["IBM"]["PelJson"] = pelJson;
+        asyncResp->res.jsonValue["Oem"]["IBM"]["@odata.type"] =
+            "#IBMLogEntryAttachment.v1_0_0.IBM";
+    };
+
+    uint32_t id = 0;
+
+    auto [ptrIndex,
+          ecIndex] = std::from_chars(&*entryID.begin(), &*entryID.end(), id);
+
+    if (ecIndex != std::errc())
+>>>>>>> 294da5e67 (Fix Redfish Service Validator 3.0.6 issues)
     {
         return;
     }
+<<<<<<< HEAD
     if (managerId != BMCWEB_REDFISH_MANAGER_URI_NAME)
     {
         messages::resourceNotFound(asyncResp->res, "Manager", managerId);
@@ -340,6 +381,236 @@ inline void handleManagersEventLogServiceGet(
     }
     eventlog_utils::handleSystemsAndManagersEventLogServiceGet(
         asyncResp, eventlog_utils::LogServiceParentCollection::Managers);
+=======
+
+    dbus::utility::async_method_call(
+        respHandler, "xyz.openbmc_project.Logging",
+        "/xyz/openbmc_project/logging", "org.open_power.Logging.PEL",
+        "GetPELJSON", id);
+}
+
+inline void requestRoutesDBusEventLogEntryDownloadPelJson(App& app)
+{
+    BMCWEB_ROUTE(
+        app,
+        "/redfish/v1/Systems/<str>/LogServices/EventLog/Entries/<str>/OemPelAttachment/")
+        .privileges(redfish::privileges::getLogEntry)
+        .methods(boost::beast::http::verb::get)(
+            [&app](const crow::Request& req,
+                   const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
+                   const std::string& systemName, const std::string& param)
+
+            {
+                if (!redfish::setUpRedfishRoute(app, req, asyncResp))
+                {
+                    return;
+                }
+                if constexpr (BMCWEB_EXPERIMENTAL_REDFISH_MULTI_COMPUTER_SYSTEM)
+                {
+                    // Option currently returns no systems.  TBD
+                    messages::resourceNotFound(asyncResp->res, "ComputerSystem",
+                                               systemName);
+                    return;
+                }
+                if (systemName != BMCWEB_REDFISH_SYSTEM_URI_NAME)
+                {
+                    messages::resourceNotFound(asyncResp->res, "ComputerSystem",
+                                               systemName);
+                    return;
+                }
+
+                std::string entryID = param;
+                dbus::utility::escapePathForDbus(entryID);
+
+                redfish::error_log_utils::getHiddenPropertyValue(
+                    asyncResp, entryID,
+                    [asyncResp,
+                     entryID](const std::optional<bool>& hiddenPropVal) {
+                        if (hiddenPropVal.value_or(true))
+                        {
+                            messages::resourceNotFound(asyncResp->res,
+                                                       "LogEntry", entryID);
+                            return;
+                        }
+                        boost::urls::url urlLogEntryPrefix = boost::urls::format(
+                            "/redfish/v1/Systems/{}/LogServices/EventLog/Entries",
+                            BMCWEB_REDFISH_SYSTEM_URI_NAME);
+                        displayOemPelAttachment(asyncResp, urlLogEntryPrefix,
+                                                entryID);
+                    });
+            });
+}
+
+inline void requestRoutesBMCDumpService(App& app)
+{
+    BMCWEB_ROUTE(app, "/redfish/v1/Managers/<str>/LogServices/Dump/")
+        .privileges(redfish::privileges::getLogService)
+        .methods(boost::beast::http::verb::get)(std::bind_front(
+            handleLogServicesDumpServiceGet, std::ref(app), "BMC"));
+}
+
+inline void requestRoutesBMCDumpEntryCollection(App& app)
+{
+    BMCWEB_ROUTE(app, "/redfish/v1/Managers/<str>/LogServices/Dump/Entries/")
+        .privileges(redfish::privileges::getLogEntryCollection)
+        .methods(boost::beast::http::verb::get)(std::bind_front(
+            handleLogServicesDumpEntriesCollectionGet, std::ref(app), "BMC"));
+}
+
+inline void requestRoutesBMCDumpEntry(App& app)
+{
+    BMCWEB_ROUTE(app,
+                 "/redfish/v1/Managers/<str>/LogServices/Dump/Entries/<str>/")
+        .privileges(redfish::privileges::getLogEntry)
+        .methods(boost::beast::http::verb::get)(std::bind_front(
+            handleLogServicesDumpEntryGet, std::ref(app), "BMC"));
+
+    BMCWEB_ROUTE(app,
+                 "/redfish/v1/Managers/<str>/LogServices/Dump/Entries/<str>/")
+        .privileges(redfish::privileges::deleteLogEntry)
+        .methods(boost::beast::http::verb::delete_)(std::bind_front(
+            handleLogServicesDumpEntryDelete, std::ref(app), "BMC"));
+}
+
+inline void requestRoutesBMCDumpEntryDownload(App& app)
+{
+    BMCWEB_ROUTE(
+        app,
+        "/redfish/v1/Managers/<str>/LogServices/Dump/Entries/<str>/attachment/")
+        .privileges(redfish::privileges::getLogEntry)
+        .methods(boost::beast::http::verb::get)(std::bind_front(
+            handleLogServicesDumpEntryDownloadGet, std::ref(app), "BMC"));
+}
+
+inline void requestRoutesBMCDumpCreate(App& app)
+{
+    BMCWEB_ROUTE(
+        app,
+        "/redfish/v1/Managers/<str>/LogServices/Dump/Actions/LogService.CollectDiagnosticData/")
+        .privileges(redfish::privileges::postLogService)
+        .methods(boost::beast::http::verb::post)(
+            std::bind_front(handleLogServicesDumpCollectDiagnosticDataPost,
+                            std::ref(app), "BMC"));
+}
+
+inline void requestRoutesBMCDumpClear(App& app)
+{
+    BMCWEB_ROUTE(
+        app,
+        "/redfish/v1/Managers/<str>/LogServices/Dump/Actions/LogService.ClearLog/")
+        .privileges(redfish::privileges::postLogService)
+        .methods(boost::beast::http::verb::post)(std::bind_front(
+            handleLogServicesDumpClearLogPost, std::ref(app), "BMC"));
+}
+
+inline void requestRoutesDBusEventLogEntryDownload(App& app)
+{
+    BMCWEB_ROUTE(
+        app,
+        "/redfish/v1/Systems/<str>/LogServices/EventLog/Entries/<str>/attachment/")
+        .privileges(redfish::privileges::getLogEntry)
+        .methods(boost::beast::http::verb::get)(
+            std::bind_front(handleDBusEventLogEntryDownloadGet, std::ref(app),
+                            "System", false));
+}
+
+inline void requestRoutesFaultLogDumpService(App& app)
+{
+    BMCWEB_ROUTE(app, "/redfish/v1/Managers/<str>/LogServices/FaultLog/")
+        .privileges(redfish::privileges::getLogService)
+        .methods(boost::beast::http::verb::get)(std::bind_front(
+            handleLogServicesDumpServiceGet, std::ref(app), "FaultLog"));
+}
+
+inline void requestRoutesFaultLogDumpEntryCollection(App& app)
+{
+    BMCWEB_ROUTE(app,
+                 "/redfish/v1/Managers/<str>/LogServices/FaultLog/Entries/")
+        .privileges(redfish::privileges::getLogEntryCollection)
+        .methods(boost::beast::http::verb::get)(
+            std::bind_front(handleLogServicesDumpEntriesCollectionGet,
+                            std::ref(app), "FaultLog"));
+}
+
+inline void requestRoutesFaultLogDumpEntry(App& app)
+{
+    BMCWEB_ROUTE(
+        app, "/redfish/v1/Managers/<str>/LogServices/FaultLog/Entries/<str>/")
+        .privileges(redfish::privileges::getLogEntry)
+        .methods(boost::beast::http::verb::get)(std::bind_front(
+            handleLogServicesDumpEntryGet, std::ref(app), "FaultLog"));
+
+    BMCWEB_ROUTE(
+        app, "/redfish/v1/Managers/<str>/LogServices/FaultLog/Entries/<str>/")
+        .privileges(redfish::privileges::deleteLogEntry)
+        .methods(boost::beast::http::verb::delete_)(std::bind_front(
+            handleLogServicesDumpEntryDelete, std::ref(app), "FaultLog"));
+}
+
+inline void requestRoutesFaultLogDumpClear(App& app)
+{
+    BMCWEB_ROUTE(
+        app,
+        "/redfish/v1/Managers/<str>/LogServices/FaultLog/Actions/LogService.ClearLog/")
+        .privileges(redfish::privileges::postLogService)
+        .methods(boost::beast::http::verb::post)(std::bind_front(
+            handleLogServicesDumpClearLogPost, std::ref(app), "FaultLog"));
+}
+
+inline void requestRoutesSystemDumpService(App& app)
+{
+    BMCWEB_ROUTE(app, "/redfish/v1/Systems/<str>/LogServices/Dump/")
+        .privileges(redfish::privileges::getLogService)
+        .methods(boost::beast::http::verb::get)(std::bind_front(
+            handleLogServicesDumpServiceComputerSystemGet, std::ref(app)));
+}
+
+inline void requestRoutesSystemDumpEntryCollection(App& app)
+{
+    BMCWEB_ROUTE(app, "/redfish/v1/Systems/<str>/LogServices/Dump/Entries/")
+        .privileges(redfish::privileges::getLogEntryCollection)
+        .methods(boost::beast::http::verb::get)(std::bind_front(
+            handleLogServicesDumpEntriesCollectionComputerSystemGet,
+            std::ref(app)));
+}
+
+inline void requestRoutesSystemDumpEntry(App& app)
+{
+    BMCWEB_ROUTE(app,
+                 "/redfish/v1/Systems/<str>/LogServices/Dump/Entries/<str>/")
+        .privileges(redfish::privileges::getLogEntry)
+        .methods(boost::beast::http::verb::get)(std::bind_front(
+            handleLogServicesDumpEntryComputerSystemGet, std::ref(app)));
+
+    BMCWEB_ROUTE(app,
+                 "/redfish/v1/Systems/<str>/LogServices/Dump/Entries/<str>/")
+        .privileges(redfish::privileges::deleteLogEntry)
+        .methods(boost::beast::http::verb::delete_)(std::bind_front(
+            handleLogServicesDumpEntryComputerSystemDelete, std::ref(app)));
+}
+
+inline void requestRoutesSystemDumpCreate(App& app)
+{
+    BMCWEB_ROUTE(
+        app,
+        "/redfish/v1/Systems/<str>/LogServices/Dump/Actions/LogService.CollectDiagnosticData/")
+        .privileges(redfish::privileges::
+                        postLogServiceSubOverComputerSystemLogServiceCollection)
+        .methods(boost::beast::http::verb::post)(std::bind_front(
+            handleLogServicesDumpCollectDiagnosticDataComputerSystemPost,
+            std::ref(app)));
+}
+
+inline void requestRoutesSystemDumpClear(App& app)
+{
+    BMCWEB_ROUTE(
+        app,
+        "/redfish/v1/Systems/<str>/LogServices/Dump/Actions/LogService.ClearLog/")
+        .privileges(redfish::privileges::
+                        postLogServiceSubOverComputerSystemLogServiceCollection)
+        .methods(boost::beast::http::verb::post)(std::bind_front(
+            handleLogServicesDumpClearLogComputerSystemPost, std::ref(app)));
+>>>>>>> 294da5e67 (Fix Redfish Service Validator 3.0.6 issues)
 }
 
 inline void requestRoutesCrashdumpService(App& app)

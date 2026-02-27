@@ -36,6 +36,17 @@
           <Annotation Term="OData.LongDescription" String="A true value resets the PCIe Link."/>
         </Property>
       </ComplexType>
+<<<<<<< HEAD
+=======
+
+      <ComplexType Name="PCIeLinks" BaseType="Resource.OemObject">
+        <NavigationProperty Name="PCIeSlot" Type="Resource.Resource">
+          <Annotation Term="OData.Permissions" EnumMember="OData.Permission/Read"/>
+          <Annotation Term="OData.Description" String="PCIe Slot Link"/>
+          <Annotation Term="OData.LongDescription" String="Represent PCIe Slot Link which has all PCIe device list."/>
+        </NavigationProperty>
+      </ComplexType>
+>>>>>>> 294da5e67 (Fix Redfish Service Validator 3.0.6 issues)
     </Schema>
   </edmx:DataServices>
 </edmx:Edmx>
