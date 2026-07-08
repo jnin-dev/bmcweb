@@ -22,6 +22,7 @@
 #include "utils/hw_isolation.hpp"
 #include "utils/json_utils.hpp"
 #include "utils/name_utils.hpp"
+#include "utils/resource_utils.hpp"
 
 #include <asm-generic/errno.h>
 
@@ -143,45 +144,11 @@ inline void getCpuDataByInterface(
 {
     BMCWEB_LOG_DEBUG("Get CPU resources by interface.");
 
-    // Set the default value of state
-    asyncResp->res.jsonValue["Status"]["State"] = resource::State::Enabled;
-    asyncResp->res.jsonValue["Status"]["Health"] = resource::Health::OK;
-
     for (const auto& interface : cpuInterfacesProperties)
     {
         for (const auto& property : interface.second)
         {
-            if (property.first == "Present")
-            {
-                const bool* cpuPresent = std::get_if<bool>(&property.second);
-                if (cpuPresent == nullptr)
-                {
-                    // Important property not in desired type
-                    messages::internalError(asyncResp->res);
-                    return;
-                }
-                if (!*cpuPresent)
-                {
-                    // Slot is not populated
-                    asyncResp->res.jsonValue["Status"]["State"] =
-                        resource::State::Absent;
-                }
-            }
-            else if (property.first == "Functional")
-            {
-                const bool* cpuFunctional = std::get_if<bool>(&property.second);
-                if (cpuFunctional == nullptr)
-                {
-                    messages::internalError(asyncResp->res);
-                    return;
-                }
-                if (!*cpuFunctional)
-                {
-                    asyncResp->res.jsonValue["Status"]["Health"] =
-                        resource::Health::Critical;
-                }
-            }
-            else if (property.first == "CoreCount")
+            if (property.first == "CoreCount")
             {
                 const uint16_t* coresCount =
                     std::get_if<uint16_t>(&property.second);
@@ -311,6 +278,7 @@ inline void getCpuDataByService(
                 if (object.first.str == objPath)
                 {
                     getCpuDataByInterface(asyncResp, object.second);
+                    getResourceStatus(asyncResp, service, objPath);
                 }
             }
             return;
@@ -1000,91 +968,6 @@ inline void getProcessorPaths(
         });
 }
 
-inline void getSubProcessorsCoreHealth(
-    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
-    const std::string& service, const std::string& objPath)
-{
-    dbus::utility::getProperty<bool>(
-        service, objPath,
-        "xyz.openbmc_project.State.Decorator.OperationalStatus", "Functional",
-        [asyncResp](const boost::system::error_code& ec, bool functional) {
-            if (ec)
-            {
-                if (ec.value() != EBADR)
-                {
-                    BMCWEB_LOG_ERROR("DBUS response error, ec: {}", ec.value());
-                    messages::internalError(asyncResp->res);
-                }
-                return;
-            }
-
-            if (!functional)
-            {
-                asyncResp->res.jsonValue["Status"]["Health"] =
-                    resource::Health::Critical;
-            }
-        });
-}
-
-inline void afterGetSubProcessorsCorePresent(
-    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
-    const boost::system::error_code& ec, bool present)
-{
-    if (ec)
-    {
-        if (ec.value() != EBADR)
-        {
-            BMCWEB_LOG_ERROR("DBUS response error for Available {}",
-                             ec.value());
-            messages::internalError(asyncResp->res);
-        }
-        return;
-    }
-
-    if (!present)
-    {
-        asyncResp->res.jsonValue["Status"]["State"] = resource::State::Absent;
-        return;
-    }
-}
-
-inline void afterGetSubProcessorsCoreAvailable(
-    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
-    const std::string& service, const std::string& corePath,
-    const boost::system::error_code& ec, bool available)
-{
-    if (ec)
-    {
-        if (ec.value() != EBADR)
-        {
-            BMCWEB_LOG_ERROR("DBUS response error, ec: {}", ec.value());
-            messages::internalError(asyncResp->res);
-        }
-        return;
-    }
-
-    if (!available)
-    {
-        asyncResp->res.jsonValue["Status"]["State"] =
-            resource::State::UnavailableOffline;
-    }
-
-    dbus::utility::getProperty<bool>(
-        service, corePath, "xyz.openbmc_project.Inventory.Item", "Present",
-        std::bind_front(afterGetSubProcessorsCorePresent, asyncResp));
-}
-
-inline void getSubProcessorsCoreState(
-    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
-    const std::string& service, const std::string& corePath)
-{
-    dbus::utility::getProperty<bool>(
-        service, corePath, "xyz.openbmc_project.State.Decorator.Availability",
-        "Available",
-        std::bind_front(afterGetSubProcessorsCoreAvailable, asyncResp, service,
-                        corePath));
-}
-
 inline void getEnabledStatus(
     const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
     const std::string& service, const std::string& objPath,
@@ -1140,8 +1023,8 @@ inline void getSubProcessorsCoreData(
             }
         }
 
-        getSubProcessorsCoreState(asyncResp, service, corePath);
-        getSubProcessorsCoreHealth(asyncResp, service, corePath);
+        BMCWEB_LOG_DEBUG("getSubProcessorsCoreData");
+        getResourceStatus(asyncResp, service, corePath);
 
         if constexpr (BMCWEB_HW_ISOLATION)
         {

@@ -7,6 +7,7 @@
 #include "http_response.hpp"
 #include "license_messages.hpp"
 #include "logging.hpp"
+#include "utils/resource_utils.hpp"
 #include "utils/time_utils.hpp"
 
 #include <app.hpp>
@@ -409,8 +410,6 @@ inline void getLicenseEntryById(
                     const std::string* licenseNamePtr = nullptr;
                     const std::string* licenseTypePtr = nullptr;
                     const std::string* authorizationTypePtr = nullptr;
-                    bool available = false;
-                    bool state = false;
 
                     for (const auto& interfaceMap : objectPath.second)
                     {
@@ -486,44 +485,6 @@ inline void getLicenseEntryById(
                                 }
                             }
                         }
-                        else if (
-                            interfaceMap.first ==
-                            "xyz.openbmc_project.State.Decorator.Availability")
-                        {
-                            for (const auto& propertyMap : interfaceMap.second)
-                            {
-                                if (propertyMap.first == "Available")
-                                {
-                                    const bool* availablePtr =
-                                        std::get_if<bool>(&propertyMap.second);
-                                    if (availablePtr == nullptr)
-                                    {
-                                        messages::internalError(asyncResp->res);
-                                        break;
-                                    }
-                                    available = *availablePtr;
-                                }
-                            }
-                        }
-                        if (interfaceMap.first ==
-                            "xyz.openbmc_project.State.Decorator."
-                            "OperationalStatus")
-                        {
-                            for (const auto& propertyMap : interfaceMap.second)
-                            {
-                                if (propertyMap.first == "Functional")
-                                {
-                                    const bool* functionalPtr =
-                                        std::get_if<bool>(&propertyMap.second);
-                                    if (functionalPtr == nullptr)
-                                    {
-                                        messages::internalError(asyncResp->res);
-                                        break;
-                                    }
-                                    state = *functionalPtr;
-                                }
-                            }
-                        }
                     }
                     asyncResp->res.jsonValue["@odata.type"] =
                         "#License.v1_0_0.License";
@@ -541,28 +502,8 @@ inline void getLicenseEntryById(
                         asyncResp, *authorizationTypePtr);
                     asyncResp->res.jsonValue["MaxAuthorizedDevices"] =
                         *deviceNumPtr;
-
-                    if (available)
-                    {
-                        asyncResp->res.jsonValue["Status"]["Health"] = "OK";
-                        if (state)
-                        {
-                            asyncResp->res.jsonValue["Status"]["State"] =
-                                "Enabled";
-                        }
-                        else
-                        {
-                            asyncResp->res.jsonValue["Status"]["State"] =
-                                "Disabled";
-                        }
-                    }
-                    else
-                    {
-                        asyncResp->res.jsonValue["Status"]["Health"] =
-                            "Critical";
-                        asyncResp->res.jsonValue["Status"]["State"] =
-                            "UnavailableOffline";
-                    }
+                    getResourceStatus(asyncResp, "xyz.openbmc_project.PLDM",
+                                      objectPath.first.str);
                     return;
                 }
             }
