@@ -25,6 +25,7 @@ struct ResourceStatus
     bool present = true;
     bool available = true;
     bool functional = true;
+    bool enabled = true;
     unsigned char pending = 0;
 };
 
@@ -52,6 +53,10 @@ inline void determineResourceState(
         asyncResp->res.jsonValue["Status"]["State"] =
             resource::State::UnavailableOffline;
     }
+    else if (!status->enabled)
+    {
+        asyncResp->res.jsonValue["Status"]["State"] = resource::State::Disabled;
+    }
     else
     {
         asyncResp->res.jsonValue["Status"]["State"] = resource::State::Enabled;
@@ -75,6 +80,7 @@ inline void determineResourceState(
  * - xyz.openbmc_project.Inventory.Item::Present
  * - xyz.openbmc_project.State.Decorator.Availability::Available
  * - xyz.openbmc_project.State.Decorator.OperationalStatus::Functional
+ * - xyz.openbmc_project.Object.Enable::Enabled
  */
 inline void getResourceStatus(
     const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
@@ -86,7 +92,7 @@ inline void getResourceStatus(
 
     BMCWEB_LOG_DEBUG("getResourceStatus");
     auto status = std::make_shared<ResourceStatus>();
-    status->pending = 3;
+    status->pending = 4;
 
     sdbusplus::asio::getProperty<bool>(
         *crow::connections::systemBus, service, path,
@@ -155,6 +161,29 @@ inline void getResourceStatus(
             else
             {
                 status->functional = functional;
+            }
+            determineResourceState(asyncResp, status);
+            return;
+        });
+
+    sdbusplus::asio::getProperty<bool>(
+        *crow::connections::systemBus, service, path,
+        "xyz.openbmc_project.Object.Enable", "Enabled",
+        [status, asyncResp](const boost::system::error_code& ec, bool enabled) {
+            BMCWEB_LOG_DEBUG("getResourceStatus Enabled");
+            if (ec)
+            {
+                if (ec.value() != EBADR)
+                {
+                    BMCWEB_LOG_ERROR("DBUS response error for Enabled, ec {}",
+                                     ec.value());
+                    messages::internalError(asyncResp->res);
+                    return;
+                }
+            }
+            else
+            {
+                status->enabled = enabled;
             }
             determineResourceState(asyncResp, status);
             return;
