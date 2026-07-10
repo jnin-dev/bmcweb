@@ -17,6 +17,7 @@
 #include "utils/fan_utils.hpp"
 #include "utils/json_utils.hpp"
 #include "utils/name_utils.hpp"
+#include "utils/resource_utils.hpp"
 
 #include <asm-generic/errno.h>
 
@@ -232,57 +233,6 @@ inline void addFanCommonProperties(crow::Response& resp,
     resp.jsonValue["Status"]["Health"] = resource::Health::OK;
 }
 
-inline void getFanHealth(const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
-                         const std::string& fanPath, const std::string& service)
-{
-    dbus::utility::getProperty<bool>(
-        service, fanPath,
-        "xyz.openbmc_project.State.Decorator.OperationalStatus", "Functional",
-        [asyncResp](const boost::system::error_code& ec, const bool value) {
-            if (ec)
-            {
-                if (ec.value() != EBADR)
-                {
-                    BMCWEB_LOG_ERROR("DBUS response error for Health {}",
-                                     ec.value());
-                    messages::internalError(asyncResp->res);
-                }
-                return;
-            }
-
-            if (!value)
-            {
-                asyncResp->res.jsonValue["Status"]["Health"] =
-                    resource::Health::Critical;
-            }
-        });
-}
-
-inline void getFanState(const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
-                        const std::string& fanPath, const std::string& service)
-{
-    dbus::utility::getProperty<bool>(
-        service, fanPath, "xyz.openbmc_project.Inventory.Item", "Present",
-        [asyncResp](const boost::system::error_code& ec, const bool value) {
-            if (ec)
-            {
-                if (ec.value() != EBADR)
-                {
-                    BMCWEB_LOG_ERROR("DBUS response error for State {}",
-                                     ec.value());
-                    messages::internalError(asyncResp->res);
-                }
-                return;
-            }
-
-            if (!value)
-            {
-                asyncResp->res.jsonValue["Status"]["State"] =
-                    resource::State::Absent;
-            }
-        });
-}
-
 inline void getFanLocation(const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
                            const std::string& fanPath,
                            const std::string& service)
@@ -314,8 +264,7 @@ inline void afterGetValidFanObject(
     const std::string& fanPath, const std::string& service)
 {
     addFanCommonProperties(asyncResp->res, chassisId, fanId);
-    getFanState(asyncResp, fanPath, service);
-    getFanHealth(asyncResp, fanPath, service);
+    resource_utils::getResourceStatus(asyncResp, service, fanPath);
     asset_utils::getAssetInfo(asyncResp, service, fanPath, ""_json_pointer,
                               true);
     getFanLocation(asyncResp, fanPath, service);
