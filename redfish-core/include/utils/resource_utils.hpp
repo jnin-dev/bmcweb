@@ -30,6 +30,7 @@ struct ResourceStatus
     bool present = true;
     bool available = true;
     bool functional = true;
+    bool enabled = true;
     uint8_t pending = 0;
 };
 
@@ -58,6 +59,10 @@ inline void determineResourceState(
     else if (!status->available)
     {
         statusJson["State"] = resource::State::UnavailableOffline;
+    }
+    else if (!status->enabled)
+    {
+        asyncResp->res.jsonValue["Status"]["State"] = resource::State::Disabled;
     }
     else
     {
@@ -110,10 +115,11 @@ inline void getStatusProperty(
 /*
  * @brief Retrieves the status of the resource's state and health
  *
- * Queries three interfaces:
+ * Queries four interfaces:
  * - xyz.openbmc_project.Inventory.Item::Present
  * - xyz.openbmc_project.State.Decorator.Availability::Available
  * - xyz.openbmc_project.State.Decorator.OperationalStatus::Functional
+ * - xyz.openbmc_project.Object.Enable::Enabled
  */
 inline void getResourceStatus(
     const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
@@ -128,7 +134,7 @@ inline void getResourceStatus(
 
     BMCWEB_LOG_DEBUG("getResourceStatus");
     auto status = std::make_shared<ResourceStatus>();
-    status->pending = 3;
+    status->pending = 4;
 
     getStatusProperty(asyncResp, status, service, path,
                       "xyz.openbmc_project.Inventory.Item", "Present", jsonPtr,
@@ -141,6 +147,9 @@ inline void getResourceStatus(
                       "xyz.openbmc_project.State.Decorator.OperationalStatus",
                       "Functional", jsonPtr,
                       [](ResourceStatus& s, bool val) { s.functional = val; });
+    getStatusProperty(asyncResp, status, service, path,
+                      "xyz.openbmc_project.Object.Enable", "Enabled", jsonPtr,
+                      [](ResourceStatus& s, bool val) { s.enabled = val; });
 }
 
 inline void getResourceStatus(
