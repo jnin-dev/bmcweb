@@ -18,6 +18,8 @@
 #include <memory>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
 namespace redfish
 {
 namespace resource_utils
@@ -37,7 +39,8 @@ struct ResourceStatus
  */
 inline void determineResourceState(
     const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
-    const std::shared_ptr<ResourceStatus>& status)
+    const std::shared_ptr<ResourceStatus>& status,
+    const nlohmann::json::json_pointer& jsonPtr)
 {
     BMCWEB_LOG_DEBUG("determineResourceState");
     if (--status->pending != 0)
@@ -45,29 +48,29 @@ inline void determineResourceState(
         return;
     }
 
+    nlohmann::json& statusJson = asyncResp->res.jsonValue[jsonPtr]["Status"];
+
     // Absent takes priority over unavailable
     if (!status->present)
     {
-        asyncResp->res.jsonValue["Status"]["State"] = resource::State::Absent;
+        statusJson["State"] = resource::State::Absent;
     }
     else if (!status->available)
     {
-        asyncResp->res.jsonValue["Status"]["State"] =
-            resource::State::UnavailableOffline;
+        statusJson["State"] = resource::State::UnavailableOffline;
     }
     else
     {
-        asyncResp->res.jsonValue["Status"]["State"] = resource::State::Enabled;
+        statusJson["State"] = resource::State::Enabled;
     }
 
     if (!status->functional)
     {
-        asyncResp->res.jsonValue["Status"]["Health"] =
-            resource::Health::Critical;
+        statusJson["Health"] = resource::Health::Critical;
     }
     else
     {
-        asyncResp->res.jsonValue["Status"]["Health"] = resource::Health::OK;
+        statusJson["Health"] = resource::Health::OK;
     }
 }
 
@@ -79,12 +82,12 @@ inline void getStatusProperty(
     const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
     const std::shared_ptr<ResourceStatus>& status, const std::string& service,
     const std::string& path, const std::string& interface,
-    const std::string& property,
+    const std::string& property, const nlohmann::json::json_pointer& jsonPtr,
     std::function<void(ResourceStatus&, bool)>&& callback)
 {
     sdbusplus::asio::getProperty<bool>(
         *crow::connections::systemBus, service, path, interface, property,
-        [status, asyncResp, property, callback{std::move(callback)}](
+        [status, asyncResp, property, jsonPtr, callback{std::move(callback)}](
             const boost::system::error_code& ec, bool value) {
             if (ec)
             {
@@ -100,7 +103,7 @@ inline void getStatusProperty(
             {
                 callback(*status, value);
             }
-            determineResourceState(asyncResp, status);
+            determineResourceState(asyncResp, status, jsonPtr);
         });
 }
 
@@ -114,27 +117,37 @@ inline void getStatusProperty(
  */
 inline void getResourceStatus(
     const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
-    const std::string& service, const std::string& path)
+    const std::string& service, const std::string& path,
+    const nlohmann::json::json_pointer& jsonPtr)
 {
     // Default values
-    asyncResp->res.jsonValue["Status"]["State"] = resource::State::Enabled;
-    asyncResp->res.jsonValue["Status"]["Health"] = resource::Health::OK;
+    asyncResp->res.jsonValue[jsonPtr]["Status"]["State"] =
+        resource::State::Enabled;
+    asyncResp->res.jsonValue[jsonPtr]["Status"]["Health"] =
+        resource::Health::OK;
 
     BMCWEB_LOG_DEBUG("getResourceStatus");
     auto status = std::make_shared<ResourceStatus>();
     status->pending = 3;
 
     getStatusProperty(asyncResp, status, service, path,
-                      "xyz.openbmc_project.Inventory.Item", "Present",
+                      "xyz.openbmc_project.Inventory.Item", "Present", jsonPtr,
                       [](ResourceStatus& s, bool val) { s.present = val; });
     getStatusProperty(asyncResp, status, service, path,
                       "xyz.openbmc_project.State.Decorator.Availability",
-                      "Available",
+                      "Available", jsonPtr,
                       [](ResourceStatus& s, bool val) { s.available = val; });
     getStatusProperty(asyncResp, status, service, path,
                       "xyz.openbmc_project.State.Decorator.OperationalStatus",
-                      "Functional",
+                      "Functional", jsonPtr,
                       [](ResourceStatus& s, bool val) { s.functional = val; });
+}
+
+inline void getResourceStatus(
+    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
+    const std::string& service, const std::string& path)
+{
+    getResourceStatus(asyncResp, service, path, ""_json_pointer);
 }
 
 } // namespace resource_utils
