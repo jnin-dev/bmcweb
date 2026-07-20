@@ -22,6 +22,7 @@
 #include "utils/hw_isolation.hpp"
 #include "utils/json_utils.hpp"
 #include "utils/name_utils.hpp"
+#include "utils/resource_utils.hpp"
 
 #include <asm-generic/errno.h>
 
@@ -147,137 +148,91 @@ inline void getCpuDataByInterface(
     asyncResp->res.jsonValue["Status"]["State"] = resource::State::Enabled;
     asyncResp->res.jsonValue["Status"]["Health"] = resource::Health::OK;
 
-    for (const auto& interface : cpuInterfacesProperties)
+    const bool* cpuPresent = nullptr;
+    const bool* cpuAvailable = nullptr;
+    const bool* cpuFunctional = nullptr;
+    const uint16_t* coresCount = nullptr;
+    const uint16_t* coreThreadCount = nullptr;
+    const uint16_t* coreEffectiveFamily = nullptr;
+    const uint16_t* coreEffectiveModel = nullptr;
+    const uint16_t* coreStep = nullptr;
+    const uint32_t* coreMaxSpeed = nullptr;
+    const uint32_t* coreMicrocode = nullptr;
+    const uint64_t* coreId = nullptr;
+    const std::string* coreSocket = nullptr;
+
+    for (const auto& [interface, properties] : cpuInterfacesProperties)
     {
-        for (const auto& property : interface.second)
+        const bool success = sdbusplus::unpackPropertiesNoThrow(
+            dbus_utils::UnpackErrorPrinter(), properties, "Present",
+            cpuPresent, "Available", cpuAvailable, "Functional", cpuFunctional,
+            "CoreCount", coresCount, "ThreadCount", coreThreadCount,
+            "EffectiveFamily", coreEffectiveFamily, "EffectiveModel",
+            coreEffectiveModel, "Step", coreStep, "MaxSpeedInMhz", coreMaxSpeed,
+            "Microcode", coreMicrocode, "Id", coreId, "Socket", coreSocket);
+
+        if (!success)
         {
-            if (property.first == "Present")
-            {
-                const bool* cpuPresent = std::get_if<bool>(&property.second);
-                if (cpuPresent == nullptr)
-                {
-                    // Important property not in desired type
-                    messages::internalError(asyncResp->res);
-                    return;
-                }
-                if (!*cpuPresent)
-                {
-                    // Slot is not populated
-                    asyncResp->res.jsonValue["Status"]["State"] =
-                        resource::State::Absent;
-                }
-            }
-            else if (property.first == "Functional")
-            {
-                const bool* cpuFunctional = std::get_if<bool>(&property.second);
-                if (cpuFunctional == nullptr)
-                {
-                    messages::internalError(asyncResp->res);
-                    return;
-                }
-                if (!*cpuFunctional)
-                {
-                    asyncResp->res.jsonValue["Status"]["Health"] =
-                        resource::Health::Critical;
-                }
-            }
-            else if (property.first == "CoreCount")
-            {
-                const uint16_t* coresCount =
-                    std::get_if<uint16_t>(&property.second);
-                if (coresCount == nullptr)
-                {
-                    messages::internalError(asyncResp->res);
-                    return;
-                }
-                asyncResp->res.jsonValue["TotalCores"] = *coresCount;
-            }
-            else if (property.first == "MaxSpeedInMhz")
-            {
-                const uint32_t* value = std::get_if<uint32_t>(&property.second);
-                if (value != nullptr)
-                {
-                    asyncResp->res.jsonValue["MaxSpeedMHz"] = *value;
-                }
-            }
-            else if (property.first == "Socket")
-            {
-                const std::string* value =
-                    std::get_if<std::string>(&property.second);
-                if (value != nullptr)
-                {
-                    asyncResp->res.jsonValue["Socket"] = *value;
-                }
-            }
-            else if (property.first == "ThreadCount")
-            {
-                const uint16_t* value = std::get_if<uint16_t>(&property.second);
-                if (value != nullptr)
-                {
-                    asyncResp->res.jsonValue["TotalThreads"] = *value;
-                }
-            }
-            else if (property.first == "EffectiveFamily")
-            {
-                const uint16_t* value = std::get_if<uint16_t>(&property.second);
-                if (value != nullptr && *value != 2)
-                {
-                    asyncResp->res.jsonValue["ProcessorId"]["EffectiveFamily"] =
-                        "0x" + intToHexString(*value, 4);
-                }
-            }
-            else if (property.first == "EffectiveModel")
-            {
-                const uint16_t* value = std::get_if<uint16_t>(&property.second);
-                if (value == nullptr)
-                {
-                    messages::internalError(asyncResp->res);
-                    return;
-                }
-                if (*value != 0)
-                {
-                    asyncResp->res.jsonValue["ProcessorId"]["EffectiveModel"] =
-                        "0x" + intToHexString(*value, 4);
-                }
-            }
-            else if (property.first == "Id")
-            {
-                const uint64_t* value = std::get_if<uint64_t>(&property.second);
-                if (value != nullptr && *value != 0)
-                {
-                    asyncResp->res
-                        .jsonValue["ProcessorId"]["IdentificationRegisters"] =
-                        "0x" + intToHexString(*value, 16);
-                }
-            }
-            else if (property.first == "Microcode")
-            {
-                const uint32_t* value = std::get_if<uint32_t>(&property.second);
-                if (value == nullptr)
-                {
-                    messages::internalError(asyncResp->res);
-                    return;
-                }
-                if (*value != 0)
-                {
-                    asyncResp->res.jsonValue["ProcessorId"]["MicrocodeInfo"] =
-                        "0x" + intToHexString(*value, 8);
-                }
-            }
-            else if (property.first == "Step")
-            {
-                const uint16_t* value = std::get_if<uint16_t>(&property.second);
-                if (value == nullptr)
-                {
-                    messages::internalError(asyncResp->res);
-                    return;
-                }
-                if (*value != std::numeric_limits<uint16_t>::max())
-                {
-                    asyncResp->res.jsonValue["ProcessorId"]["Step"] =
-                        "0x" + intToHexString(*value, 4);
-                }
-            }
+            messages::internalError(asyncResp->res);
+            return;
+        }
+
+        if (cpuPresent != nullptr && !*cpuPresent)
+        {
+            asyncResp->res.jsonValue["Status"]["State"] =
+                resource::State::Absent;
+        }
+        if (cpuAvailable != nullptr && !*cpuAvailable)
+        {
+            asyncResp->res.jsonValue["Status"]["State"] =
+                resource::State::UnavailableOffline;
+        }
+        if (cpuFunctional != nullptr && !*cpuFunctional)
+        {
+            asyncResp->res.jsonValue["Status"]["Health"] =
+                resource::Health::Critical;
+        }
+        if (coresCount != nullptr)
+        {
+            asyncResp->res.jsonValue["TotalCores"] = *coresCount;
+        }
+        if (coreMaxSpeed != nullptr)
+        {
+            asyncResp->res.jsonValue["MaxSpeedMHz"] = *coreMaxSpeed;
+        }
+        if (coreSocket != nullptr)
+        {
+            asyncResp->res.jsonValue["Socket"] = *coreSocket;
+        }
+        if (coreThreadCount != nullptr)
+        {
+            asyncResp->res.jsonValue["TotalThreads"] = *coreThreadCount;
+        }
+        if (coreEffectiveFamily != nullptr && *coreEffectiveFamily != 2)
+        {
+            asyncResp->res.jsonValue["ProcessorId"]["EffectiveFamily"] =
+                "0x" + intToHexString(*coreEffectiveFamily, 4);
+        }
+        if (coreEffectiveModel != nullptr && *coreEffectiveModel != 0)
+        {
+            asyncResp->res.jsonValue["ProcessorId"]["EffectiveModel"] =
+                "0x" + intToHexString(*coreEffectiveModel, 4);
+        }
+        if (coreId != nullptr && *coreId != 0)
+        {
+            asyncResp->res
+                .jsonValue["ProcessorId"]["IdentificationRegisters"] =
+                "0x" + intToHexString(*coreId, 16);
+        }
+        if (coreMicrocode != nullptr && *coreMicrocode != 0)
+        {
+            asyncResp->res.jsonValue["ProcessorId"]["MicrocodeInfo"] =
+                "0x" + intToHexString(*coreMicrocode, 8);
+        }
+        if (coreStep != nullptr && *coreStep != std::numeric_limits<uint16_t>::max())
+        {
+            asyncResp->res.jsonValue["ProcessorId"]["Step"] =
+                "0x" + intToHexString(*coreStep, 4);
         }
     }
 }
@@ -537,10 +492,11 @@ inline void getAcceleratorDataByService(
 
             const bool* functional = nullptr;
             const bool* present = nullptr;
+            const bool* available = nullptr;
 
             const bool success = sdbusplus::unpackPropertiesNoThrow(
                 dbus_utils::UnpackErrorPrinter(), properties, "Functional",
-                functional, "Present", present);
+                functional, "Present", present, "Available", available);
 
             if (!success)
             {
@@ -548,19 +504,23 @@ inline void getAcceleratorDataByService(
                 return;
             }
 
-            std::string state = "Enabled";
-            std::string health = "OK";
+            auto state = resource::State::Enabled;
+            auto health = resource::Health::OK;
 
             if (present != nullptr && !*present)
             {
-                state = "Absent";
+                state = resource::State::Absent;
+            }
+            else if (available != nullptr && !*available)
+            {
+                state = resource::State::UnavailableOffline;
             }
 
             if (functional != nullptr && !*functional)
             {
-                if (state == "Enabled")
+                if (state == resource::State::Enabled)
                 {
-                    health = "Critical";
+                    health = resource::Health::Critical;
                 }
             }
 
@@ -1026,65 +986,6 @@ inline void getSubProcessorsCoreHealth(
         });
 }
 
-inline void afterGetSubProcessorsCorePresent(
-    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
-    const boost::system::error_code& ec, bool present)
-{
-    if (ec)
-    {
-        if (ec.value() != EBADR)
-        {
-            BMCWEB_LOG_ERROR("DBUS response error for Available {}",
-                             ec.value());
-            messages::internalError(asyncResp->res);
-        }
-        return;
-    }
-
-    if (!present)
-    {
-        asyncResp->res.jsonValue["Status"]["State"] = resource::State::Absent;
-        return;
-    }
-}
-
-inline void afterGetSubProcessorsCoreAvailable(
-    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
-    const std::string& service, const std::string& corePath,
-    const boost::system::error_code& ec, bool available)
-{
-    if (ec)
-    {
-        if (ec.value() != EBADR)
-        {
-            BMCWEB_LOG_ERROR("DBUS response error, ec: {}", ec.value());
-            messages::internalError(asyncResp->res);
-        }
-        return;
-    }
-
-    if (!available)
-    {
-        asyncResp->res.jsonValue["Status"]["State"] =
-            resource::State::UnavailableOffline;
-    }
-
-    dbus::utility::getProperty<bool>(
-        service, corePath, "xyz.openbmc_project.Inventory.Item", "Present",
-        std::bind_front(afterGetSubProcessorsCorePresent, asyncResp));
-}
-
-inline void getSubProcessorsCoreState(
-    const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
-    const std::string& service, const std::string& corePath)
-{
-    dbus::utility::getProperty<bool>(
-        service, corePath, "xyz.openbmc_project.State.Decorator.Availability",
-        "Available",
-        std::bind_front(afterGetSubProcessorsCoreAvailable, asyncResp, service,
-                        corePath));
-}
-
 inline void getEnabledStatus(
     const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
     const std::string& service, const std::string& objPath,
@@ -1122,9 +1023,6 @@ inline void getSubProcessorsCoreData(
     asyncResp->res.jsonValue["Name"] = "SubProcessor";
     asyncResp->res.jsonValue["Id"] = coreId;
 
-    asyncResp->res.jsonValue["Status"]["State"] = resource::State::Enabled;
-    asyncResp->res.jsonValue["Status"]["Health"] = resource::Health::OK;
-
     for (const auto& [service, interfaces] : object)
     {
         for (const auto& intf : interfaces)
@@ -1140,8 +1038,8 @@ inline void getSubProcessorsCoreData(
             }
         }
 
-        getSubProcessorsCoreState(asyncResp, service, corePath);
-        getSubProcessorsCoreHealth(asyncResp, service, corePath);
+        resource_utils::getResourceState(asyncResp, service, corePath);
+        resource_utils::getResourceHealth(asyncResp, service, corePath);
 
         if constexpr (BMCWEB_HW_ISOLATION)
         {
