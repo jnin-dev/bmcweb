@@ -342,4 +342,23 @@ inline void handleManagerForceFailover(
         options);
 }
 
+inline void getManagerRole(const std::shared_ptr<bmcweb::AsyncResp>& asyncResp,
+                           std::function<void(const boost::system::error_code&,
+                                              const std::string&)>&& callback)
+{
+    BMCWEB_LOG_DEBUG("getManagerRole");
+    constexpr const char* service = "xyz.openbmc_project.State.BMC.Redundancy";
+    constexpr const char* objectPath = "/xyz/openbmc_project/state/bmc0";
+    constexpr const char* interface =
+        "xyz.openbmc_project.State.BMC.Redundancy";
+    constexpr const char* property = "Role";
+
+    dbus::utility::getProperty<std::string>(
+        service, objectPath, interface, property,
+        [asyncResp, callback = std::move(callback)](
+            const boost::system::error_code& ec, const std::string& role) {
+            callback(ec, role);
+        });
+}
+
 } // namespace redfish
